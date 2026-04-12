@@ -24,10 +24,10 @@ public class Main {
     private static final String PDF_PAGE_SEL = ".pdf-page";
     private static final String WORD_PAGE_SEL = ".canvas-unit";
     // ─────────────────────────────────────────────────────────
-
+/*867 1264201*/
     public static void main(String[] args) throws Exception {
         String baseUrl = "https://abooks.hep.com.cn/867/";
-        String baseDir = "output2";
+        String baseDir = "output3";
         String statePath = "state.json";
 
         Files.createDirectories(Paths.get(baseDir));
@@ -37,7 +37,7 @@ public class Main {
                     new BrowserType.LaunchOptions().setHeadless(true)
             );
 
-            for (int i = 10; i < 29; i++) {
+            for (int i = 49; i < 50; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
