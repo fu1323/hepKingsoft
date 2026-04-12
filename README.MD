@@ -1,0 +1,1 @@
+一个基于playwright的工具，爬取高等教育出版社旗下 新形态教材网书后资源文档（视频会跳过），网站调用了金山文档api，iframe嵌入，所以工具可以灵活修改爬取金山文档禁止下载的pdf和word。pdf采用了滚动截图的处理，word由于是动态渲染的svg，用了新建canvas拷贝svg然后把canvas传回来  感谢claude帮助支招 调试。项目基于java，初次运行maven会自动下载playwright依赖 chromium node环境  首次使用先运行cookie类获取cookie 然后在运行Main。
