@@ -1,0 +1,1 @@
+find folder -name "*.png" -type f -exec sh -c 'mkdir -p "output/$(dirname "${1#folder/}")"; magick "$1" -background white -flatten -alpha off "output/${1#folder/}"' _ {} \;
