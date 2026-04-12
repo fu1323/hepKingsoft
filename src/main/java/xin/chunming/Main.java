@@ -37,7 +37,7 @@ public class Main {
                     new BrowserType.LaunchOptions().setHeadless(true)
             );
 
-            for (int i = 3; i < 150; i++) {
+            for (int i = 10; i < 29; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
