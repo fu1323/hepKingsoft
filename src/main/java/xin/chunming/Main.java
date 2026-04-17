@@ -3,6 +3,9 @@ package xin.chunming;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ScreenshotCaret;
 import com.microsoft.playwright.options.WaitForSelectorState;
+import okhttp3.*;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import java.awt.image.BufferedImage;
 import java.io.*;
@@ -20,7 +23,12 @@ import javax.imageio.ImageIO;
 public class Main {
 
     // ─── 配置区 ───────────────────────────────────────────────
+    private static final int PDF = 0;   // 初始页面加载等待
+    private static final int ERR = 3;   // 初始页面加载等待
     private static final int PAGE_WAIT_MS = 5000;   // 初始页面加载等待
+    private static final int PPT = 1;   // 初始页面加载等待
+    private static final int DOC = 2;   // 初始页面加载等待
+    //    private static final int PAGE_WAIT_MS = 5000;   // 初始页面加载等待
     private static final int RENDER_WAIT_MS = 1200;   // 每页渲染等待（PDF 模式）
     private static final int DEVICE_SCALE = 2;      // 截图分辨率倍数（PDF 模式）
     private static final String IFRAME_SELECTOR = "#office-iframe";
@@ -31,7 +39,8 @@ public class Main {
     // ─────────────────────────────────────────────────────────
     /*867 1264201*/
     public static void main(String[] args) throws Exception {
-        String baseUrl = "https://abooks.hep.com.cn/58604/";
+//        String baseUrl = "https://abooks.hep.com.cn/58604/";
+        String baseUrl = "https://abooks.hep.com.cn/1264201/";
         String baseDir = "output3";
         String statePath = "state.json";
 
@@ -39,10 +48,10 @@ public class Main {
 
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(false)
+                    new BrowserType.LaunchOptions().setHeadless(true)
             );
 
-            for (int i = 30; i < 32; i++) {
+            for (int i = 1; i < 130; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
@@ -56,6 +65,8 @@ public class Main {
 
                 try {
                     captureDocument(context, baseUrl + i, saveDir);
+
+
                 } finally {
                     context.close(); // ← 关键：每页处理完立即关掉
                 }
@@ -89,28 +100,52 @@ public class Main {
             Frame immFrame = findFrame1(page, false);
 
             if (immFrame == null) {
-                System.err.println("未找到文档 iframe，退出");
-                return;
+                System.err.println("未找到文档 iframe,尝试视频");
+
+            }
+            int pptCount = 0;
+            int pdfCount = 0;
+            int wordCount = 0;
+            // 3. 判断模式
+            // 3. 判断模式
+            if (immFrame != null) {
+                pptCount = immFrame.locator(".thumbnail_slide").count();
+                pdfCount = immFrame.locator(PDF_PAGE_SEL).count();
+                wordCount = immFrame.locator(WORD_PAGE_SEL).count();
             }
 
-            // 3. 判断模式
-            // 3. 判断模式
-            int pptCount = immFrame.locator(".thumbnail_slide").count();
-            int pdfCount = immFrame.locator(PDF_PAGE_SEL).count();
-            int wordCount = immFrame.locator(WORD_PAGE_SEL).count();
-            boolean isVideo = immFrame.locator("video-js, video.vjs-tech").count() > 0;
+            boolean isVideo = page.locator("video").count() > 0;
 
             System.out.printf("PDF页: %d  Word页: %d  PPT页: %d  视频: %b%n",
                     pdfCount, wordCount, pptCount, isVideo);
-
+            Locator video = null;
+            String src = null;
             if (isVideo) {
-                System.out.println("检测到视频，跳过: " + url);
+                video = page.locator("video");
+                if (video != null) {
+                    src = video.getAttribute("src");
+                }
+                if (src != null) {
+                    System.out.println("检测到视频" +src);
+                    downloadVideo(src,new File(savePath+File.separator+UUID.randomUUID().toString().replace("-","")+".mp4"));
+                }
+
+
             } else if (pdfCount > 0) {
                 capturePdfMode(page, immFrame, savePath);
+                page.close();
+
+
             } else if (wordCount > 0) {
                 captureWordMode(page, immFrame, savePath);
+                page.close();
+
+
             } else if (pptCount > 0) {
                 capturePptMode(page, immFrame, savePath);
+                page.close();
+
+
             } else {
                 System.err.println("未知结构，跳过: " + url);
             }
@@ -123,8 +158,8 @@ public class Main {
             e.printStackTrace();
         } finally {
             page.close();
-        }
 
+        }
 
     }
 
@@ -769,6 +804,57 @@ public class Main {
 
         return frame.locator(".canvas-unit").count();
     }
+    public static void downloadVideo(String url, File saveFile) {
+        OkHttpClient client = new OkHttpClient();
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36")
+                .header("Referer", "https://abooks.hep.com.cn/")
+                .header("Sec-Fetch-Site", "same-site")
+                .header("sec-fetch-dest", "video")
+                .header("sec-ch-ua", "Google Chrome\";v=\"147\", \"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"147")
+                .header("sec-ch-ua-platform", "macOS")
+                .header("Sec-Fetch-Mode", "no-cors")
 
+                .header("Connection", "keep-alive")
+                .build();
+/*sec-ch-ua
+"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"
+sec-ch-ua-mobile
+?0
+sec-ch-ua-platform
+"macOS"
+sec-fetch-dest
+video
+sec-fetch-mode
+no-cors
+sec-fetch-site
+same-site*/
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                e.printStackTrace();
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (!response.isSuccessful()) throw new IOException("Unexpected code " + response);
+
+                // 使用 try-with-resources 自动关闭流
+                try (InputStream is = response.body().byteStream();
+                     FileOutputStream fos = new FileOutputStream(saveFile)) {
+
+                    byte[] buffer = new byte[8192]; // 8KB 缓冲区
+                    int len;
+                    while ((len = is.read(buffer)) != -1) {
+                        fos.write(buffer, 0, len);
+                    }
+                    fos.flush();
+                    fos.close();
+                    System.out.println("下载完成！");
+                }
+            }
+        });
+    }
 
 }
