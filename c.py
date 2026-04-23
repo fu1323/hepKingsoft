@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#  图片转pdf工具，用于整理 (ai生成)
 import os, sys, img2pdf, io
 from PIL import Image, UnidentifiedImageError
 from pathlib import Path
