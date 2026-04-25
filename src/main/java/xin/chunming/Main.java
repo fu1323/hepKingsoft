@@ -35,14 +35,16 @@ public class Main {
     private static final String PDF_PAGE_SEL = ".pdf-page";
     private static final String PPT_PAGE_SEL = ".thumbnail_slide";
     private static final String WORD_PAGE_SEL = ".canvas-unit";
+    public static final String statePath = "state.json";
 
     // ─────────────────────────────────────────────────────────
     /*867 1264201*/
     public static void main(String[] args) throws Exception {
 //        String baseUrl = "https://abooks.hep.com.cn/58604/";
-        String baseUrl = "https://abooks.hep.com.cn/1264201/";
-        String baseDir = "output3";
-        String statePath = "state.json";
+//        String baseUrl = "https://abooks.hep.com.cn/911/";
+        String baseUrl = "https://abooks.hep.com.cn/911/";
+        String baseDir = "output30031";
+
 
         Files.createDirectories(Paths.get(baseDir));
 
@@ -51,7 +53,7 @@ public class Main {
                     new BrowserType.LaunchOptions().setHeadless(true)
             );
 
-            for (int i = 1; i < 130; i++) {
+            for (int i = 57; i < 70; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
@@ -126,8 +128,8 @@ public class Main {
                     src = video.getAttribute("src");
                 }
                 if (src != null) {
-                    System.out.println("检测到视频" +src);
-                    downloadVideo(src,new File(savePath+File.separator+UUID.randomUUID().toString().replace("-","")+".mp4"));
+                    System.out.println("检测到视频" + src);
+                    downloadVideo(src, new File(savePath + File.separator + UUID.randomUUID().toString().replace("-", "") + ".mp4"));
                 }
 
 
@@ -146,6 +148,13 @@ public class Main {
                 page.close();
 
 
+            } else if (immFrame.url().contains("hep5")) {
+                System.out.println("尝试h5动画");
+                try {
+                    AnimationMirror.saving(immFrame.url(), savePath, statePath);
+                } catch (Exception e) {
+                    System.err.println("错误:  " + e);
+                }
             } else {
                 System.err.println("未知结构，跳过: " + url);
             }
@@ -804,6 +813,7 @@ public class Main {
 
         return frame.locator(".canvas-unit").count();
     }
+
     public static void downloadVideo(String url, File saveFile) {
         OkHttpClient client = new OkHttpClient();
         Request request = new Request.Builder()
