@@ -36,24 +36,25 @@ public class Main {
     private static final String PPT_PAGE_SEL = ".thumbnail_slide";
     private static final String WORD_PAGE_SEL = ".canvas-unit";
     public static final String statePath = "state.json";
+    public static String tmpiframeurl;
 
     // ─────────────────────────────────────────────────────────
     /*867 1264201*/
     public static void main(String[] args) throws Exception {
 //        String baseUrl = "https://abooks.hep.com.cn/58604/";
 //        String baseUrl = "https://abooks.hep.com.cn/911/";
-        String baseUrl = "https://abooks.hep.com.cn/911/";
-        String baseDir = "output30031";
+        String baseUrl = "https://abooks.hep.com.cn/1611631/";
+        String baseDir = "output300311";
 
 
         Files.createDirectories(Paths.get(baseDir));
 
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(true)
+                    new BrowserType.LaunchOptions().setHeadless(false)
             );
 
-            for (int i = 57; i < 70; i++) {
+            for (int i = 2; i < 110; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
@@ -92,14 +93,22 @@ public class Main {
             page.waitForTimeout(PAGE_WAIT_MS);
 
             Thread.sleep(10000);
+            Frame immFrame = findFrame1(page, false);
 
             // 1. 尝试点击全屏/展开按钮
             tryClickFullScreen(page);
+           //26.8.31 改
+            page.navigate(tmpiframeurl);
+            immFrame = findFrame1(page, false);
+
+
+
             Thread.sleep(3000);
+            tmpiframeurl="";
 
             // 2. 定位 iframe
             // 优先用 frame()，找不到再降级用 frameLocator()
-            Frame immFrame = findFrame1(page, false);
+          //  Frame immFrame = findFrame1(page, false);
 
             if (immFrame == null) {
                 System.err.println("未找到文档 iframe,尝试视频");
@@ -646,7 +655,9 @@ public class Main {
             }
             if (btn.count() > 0 && btn.first().isVisible()) {
                 btn.first().click();
-                page.waitForTimeout(1000);
+                page.waitForTimeout(200);
+               // page.navigate(url);
+                page.waitForTimeout(2000);
                 System.out.println("已点击全屏按钮");
             }
         } catch (Exception ignored) {
@@ -667,6 +678,7 @@ public class Main {
             // 匹配阿里云 IMM office
             if (u.contains("imm.aliyuncs.com") || u.contains("office-cn")) {
                 System.out.println("找到目标 frame: " + u);
+                tmpiframeurl=u;
                 if (jump) {
                     Thread.sleep(6000);
                     page.navigate(u);
