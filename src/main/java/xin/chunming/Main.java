@@ -44,17 +44,18 @@ public class Main {
 //        String baseUrl = "https://abooks.hep.com.cn/58604/";
 //        String baseUrl = "https://abooks.hep.com.cn/911/";
         String baseUrl = "https://abooks.hep.com.cn/1611631/";
-        String baseDir = "output300311";
+        String baseDir = "output300311";//教育学原理
+
 
 
         Files.createDirectories(Paths.get(baseDir));
 
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(false)
+                    new BrowserType.LaunchOptions().setHeadless(true)
             );
 
-            for (int i = 2; i < 110; i++) {
+            for (int i = 111; i < 130; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
@@ -185,6 +186,7 @@ public class Main {
 
     private static void capturePdfMode(Page page, Frame frame, String savePath) throws InterruptedException {
         System.out.println("=== PDF 模式，边滚边截 ===");
+
 
         Set<Integer> savedIndices = new HashSet<>();
         int savedCount = 0;
