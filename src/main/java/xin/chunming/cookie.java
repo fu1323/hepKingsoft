@@ -10,9 +10,11 @@ public class cookie {
 
 
     public static void main(String[] args) {
+        System.out.println("+++++++++ 高教社资源提取工具(1、Cookie 获取模块) +++++++++ V2.0 by 猫小咪 Thanks to Claude!");
+        System.out.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                    .setHeadless(false)); // 必须设为 false，否则你没法手动登录
+                    .setHeadless(false)); // 必须设为 false，否则没法手动登录
 
             BrowserContext context = browser.newContext();
             Page page = context.newPage();

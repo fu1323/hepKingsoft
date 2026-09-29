@@ -38,24 +38,24 @@ public class Main {
     public static final String statePath = "state.json";
     public static String tmpiframeurl;
 
-    // ─────────────────────────────────────────────────────────
-    /*867 1264201*/
-    public static void main(String[] args) throws Exception {
-//        String baseUrl = "https://abooks.hep.com.cn/58604/";
-//        String baseUrl = "https://abooks.hep.com.cn/911/";
-        String baseUrl = "https://abooks.hep.com.cn/1611631/";
-        String baseDir = "output300311";//教育学原理
 
+    public static void main(String[] args) throws Exception {
+        System.out.println("+++++++++ 高教社资源提取工具 (2、下载模块)+++++++++ V2.0 by 猫小咪 Thanks to Claude!");
+        System.out.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
+//1、改这里 控制书id
+        String baseUrl = "https://abooks.hep.com.cn/4604/";
+        String baseDir = "output01";
+//2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建
 
 
         Files.createDirectories(Paths.get(baseDir));
 
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(true)
+                    new BrowserType.LaunchOptions().setHeadless(true)//4、改成false 可实时看到浏览器画面
             );
-
-            for (int i = 111; i < 130; i++) {
+//3、改这里 控制遍历的资源id
+            for (int i = 4; i < 130; i++) {
                 String saveDir = baseDir + "/" + i;
                 Files.createDirectories(Paths.get(saveDir));
 
