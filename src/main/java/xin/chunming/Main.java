@@ -37,42 +37,98 @@ public class Main {
     private static final String WORD_PAGE_SEL = ".canvas-unit";
     public static final String statePath = "state.json";
     public static String tmpiframeurl;
+    private static boolean retry = false;/**5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源 */
 
 
     public static void main(String[] args) throws Exception {
         System.out.println("+++++++++ 高教社资源提取工具 (2、下载模块)+++++++++ V2.0 by 猫小咪 Thanks to Claude!");
-        System.out.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
-//1、改这里 控制书id
-        String baseUrl = "https://abooks.hep.com.cn/4604/";
-        String baseDir = "output01";
-//2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建
-
-
+        System.err.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
+       String baseUrl = "https://abooks.hep.com.cn/4604/"; /**1、改这里 控制书id*/
+        String baseDir = "output01";  /**2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建*/
         Files.createDirectories(Paths.get(baseDir));
-
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(true)//4、改成false 可实时看到浏览器画面
+                    new BrowserType.LaunchOptions().setHeadless(true)/**4、改成false 可实时看到浏览器画面 */
             );
-//3、改这里 控制遍历的资源id
-            for (int i = 4; i < 130; i++) {
-                String saveDir = baseDir + "/" + i;
-                Files.createDirectories(Paths.get(saveDir));
+            if (retry) {
+                ArrayList<String> integers = new ArrayList<>();
+                File file = new File(baseDir);
+                if (file.exists() && file.isDirectory()) {
+                    File[] files = file.listFiles();
+                    for (int i = 0; i < files.length; i++) {
+                        if (files[i].isDirectory()) {
+                            boolean tmp = true;
+                            File[] files1 = files[i].listFiles();
+                            for (int i1 = 0; i1 < files1.length; i1++) {
+                                if (!files1[i1].getName().startsWith(".") && files1[i1].isFile()) {
+                                    tmp = false;
+                                    break;
+                                }
+                            }
+                            if (tmp) {
+                                integers.add(files[i].getPath());
+                            }
+                        }
+                    }
+                }
+                for (int i = 0; i < integers.size(); i++) {
+                    System.out.println(integers.get(i));
+                }
+                System.out.println("ALL: " + integers.size());
+                for (int i = 0; i < integers.size(); i++) {
+                    String s = integers.get(i);
+                    String[] split = s.split("/");
+                    String s1 = split[split.length - 1];
+                    System.out.println(s1);
+                    try {
+                        int i1 = Integer.parseInt(s1);
 
-                // 每次都新建 context，用完立即关闭，防止资源泄漏
-                BrowserContext context = browser.newContext(
-                        new Browser.NewContextOptions()
-                                .setViewportSize(1920, 1080)
-                                .setDeviceScaleFactor(DEVICE_SCALE)
-                                .setStorageStatePath(Paths.get(statePath))
-                );
+                        String saveDir = baseDir + "/" + i1;
+                        Files.createDirectories(Paths.get(saveDir));
 
-                try {
-                    captureDocument(context, baseUrl + i, saveDir);
+                        // 每次都新建 context，用完立即关闭，防止资源泄漏
+                        BrowserContext context = browser.newContext(
+                                new Browser.NewContextOptions()
+                                        .setViewportSize(1920, 1080)
+                                        .setDeviceScaleFactor(DEVICE_SCALE)
+                                        .setStorageStatePath(Paths.get(statePath))
+                        );
+
+                        try {
+                            captureDocument(context, baseUrl + i1, saveDir);
 
 
-                } finally {
-                    context.close(); // ← 关键：每页处理完立即关掉
+                        } finally {
+                            context.close(); // ← 关键：每页处理完立即关掉
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+
+                }
+            }
+            else {
+                /**3、改这里 控制遍历的资源id
+                 */
+                for (int i = 110; i < 120; i++) {
+                    String saveDir = baseDir + "/" + i;
+                    Files.createDirectories(Paths.get(saveDir));
+
+                    // 每次都新建 context，用完立即关闭，防止资源泄漏
+                    BrowserContext context = browser.newContext(
+                            new Browser.NewContextOptions()
+                                    .setViewportSize(1920, 1080)
+                                    .setDeviceScaleFactor(DEVICE_SCALE)
+                                    .setStorageStatePath(Paths.get(statePath))
+                    );
+
+                    try {
+                        captureDocument(context, baseUrl + i, saveDir);
+
+
+                    } finally {
+                        context.close(); // ← 关键：每页处理完立即关掉
+                    }
                 }
             }
 
@@ -98,18 +154,17 @@ public class Main {
 
             // 1. 尝试点击全屏/展开按钮
             tryClickFullScreen(page);
-           //26.8.31 改
+            //26.8.31 改
             page.navigate(tmpiframeurl);
             immFrame = findFrame1(page, false);
 
 
-
             Thread.sleep(3000);
-            tmpiframeurl="";
+            tmpiframeurl = "";
 
             // 2. 定位 iframe
             // 优先用 frame()，找不到再降级用 frameLocator()
-          //  Frame immFrame = findFrame1(page, false);
+            //  Frame immFrame = findFrame1(page, false);
 
             if (immFrame == null) {
                 System.err.println("未找到文档 iframe,尝试视频");
@@ -658,7 +713,7 @@ public class Main {
             if (btn.count() > 0 && btn.first().isVisible()) {
                 btn.first().click();
                 page.waitForTimeout(200);
-               // page.navigate(url);
+                // page.navigate(url);
                 page.waitForTimeout(2000);
                 System.out.println("已点击全屏按钮");
             }
@@ -680,7 +735,7 @@ public class Main {
             // 匹配阿里云 IMM office
             if (u.contains("imm.aliyuncs.com") || u.contains("office-cn")) {
                 System.out.println("找到目标 frame: " + u);
-                tmpiframeurl=u;
+                tmpiframeurl = u;
                 if (jump) {
                     Thread.sleep(6000);
                     page.navigate(u);

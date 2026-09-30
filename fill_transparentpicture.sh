@@ -1,3 +1,12 @@
-#!/bin/bash
-#(ai生成) 用来填充爬取word时下载的透明背景的图片为白色背景
-find folder -name "*.png" -type f -exec sh -c 'mkdir -p "output/$(dirname "${1#folder/}")"; magick "$1" -background white -flatten -alpha off "output/${1#folder/}"' _ {} \;
+#!/bin/sh
+#填充png透明背景脚本, 放到 output/下面, bash命令运行即可,输出 output/output/ 保持原有目录结构
+cd "$(dirname "$0")" || exit 1
+
+find . -type f -name "*.png" -not -path "./output/*" -exec sh -c '
+    src="$1"
+    rel="${src#./}"
+    dst="output/$rel"
+
+    mkdir -p "$(dirname "$dst")"
+    magick "$src" -background white -flatten -alpha off "$dst"
+' _ {} \;
