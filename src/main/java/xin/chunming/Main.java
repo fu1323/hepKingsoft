@@ -1,26 +1,15 @@
 package xin.chunming;
-
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ScreenshotCaret;
-import com.microsoft.playwright.options.WaitForSelectorState;
 import okhttp3.*;
 import okhttp3.Request;
 import okhttp3.Response;
-
-import java.awt.image.BufferedImage;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.Base64;
-import java.util.regex.Pattern;
-import javax.imageio.ImageIO;
-
-
-/**
- * - 金山文档批量截图工具
- * - 支持 PDF 模式和 Word 模式，Word 模式直接从 SVG DOM 提取，无需滚动截图
- */
 public class Main {
+    private static boolean retry = false;/**5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源 */
 
     // ─── 配置区 ───────────────────────────────────────────────
     private static final int PDF = 0;   // 初始页面加载等待
@@ -37,13 +26,12 @@ public class Main {
     private static final String WORD_PAGE_SEL = ".canvas-unit";
     public static final String statePath = "state.json";
     public static String tmpiframeurl;
-    private static boolean retry = false;/**5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源 */
 
 
     public static void main(String[] args) throws Exception {
         System.out.println("+++++++++ 高教社资源提取工具 (2、下载模块)+++++++++ V2.0 by 猫小咪 Thanks to Claude!");
         System.err.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
-       String baseUrl = "https://abooks.hep.com.cn/4604/"; /**1、改这里 控制书id*/
+       String baseUrl = "https://abooks.hep.com.cn/1264201/"; /**1、改这里 控制书id*/
         String baseDir = "output01";  /**2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建*/
         Files.createDirectories(Paths.get(baseDir));
         try (Playwright playwright = Playwright.create()) {
