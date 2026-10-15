@@ -1,37 +1,43 @@
 package xin.chunming;
+
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ScreenshotCaret;
 import okhttp3.*;
 import okhttp3.Request;
 import okhttp3.Response;
+
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.Base64;
+
 public class Main {
-    private static boolean retry = false;/**5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源 */
+    private static boolean retry = false;
+    /**
+     * 5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源
+     */
 
     // ─── 配置区 ───────────────────────────────────────────────
     private static final int PDF = 0;   // 初始页面加载等待
     private static final int ERR = 3;   // 初始页面加载等待
-    private static final int PAGE_WAIT_MS = 5000;   // 初始页面加载等待
+    private static final int PAGE_WAIT_MS = 1500;   // 初始页面加载等待
     private static final int PPT = 1;   // 初始页面加载等待
     private static final int DOC = 2;   // 初始页面加载等待
     //    private static final int PAGE_WAIT_MS = 5000;   // 初始页面加载等待
-    private static final int RENDER_WAIT_MS = 1200;   // 每页渲染等待（PDF 模式）
+    private static final int RENDER_WAIT_MS = 2200;   // 每页渲染等待（PDF 模式）
     private static final int DEVICE_SCALE = 2;      // 截图分辨率倍数（PDF 模式）
     private static final String IFRAME_SELECTOR = "#office-iframe";
     private static final String PDF_PAGE_SEL = ".pdf-page";
     private static final String PPT_PAGE_SEL = ".thumbnail_slide";
     private static final String WORD_PAGE_SEL = ".canvas-unit";
     public static final String statePath = "state.json";
-    public static String tmpiframeurl;
+    public static String tmpiframeurl = "";
 
 
     public static void main(String[] args) throws Exception {
         System.out.println("+++++++++ 高教社资源提取工具 (2、下载模块)+++++++++ V2.0 by 猫小咪 Thanks to Claude!");
         System.err.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
-       String baseUrl = "https://abooks.hep.com.cn/1264201/"; /**1、改这里 控制书id*/
+        String baseUrl = "https://abooks.hep.com.cn/54731/"; /**1、改这里 控制书id*/
         String baseDir = "output01";  /**2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建*/
         Files.createDirectories(Paths.get(baseDir));
         try (Playwright playwright = Playwright.create()) {
@@ -94,11 +100,10 @@ public class Main {
                     }
 
                 }
-            }
-            else {
+            } else {
                 /**3、改这里 控制遍历的资源id
                  */
-                for (int i = 110; i < 120; i++) {
+                for (int i = 222; i < 250; i++) {
                     String saveDir = baseDir + "/" + i;
                     Files.createDirectories(Paths.get(saveDir));
 
@@ -143,11 +148,13 @@ public class Main {
             // 1. 尝试点击全屏/展开按钮
             tryClickFullScreen(page);
             //26.8.31 改
-            page.navigate(tmpiframeurl);
+            if (!(tmpiframeurl.isEmpty() || tmpiframeurl.isBlank())) {
+                page.navigate(tmpiframeurl);
+            }
             immFrame = findFrame1(page, false);
 
 
-            Thread.sleep(3000);
+            Thread.sleep(5000);
             tmpiframeurl = "";
 
             // 2. 定位 iframe
