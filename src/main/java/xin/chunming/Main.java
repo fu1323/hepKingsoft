@@ -208,7 +208,7 @@ public class Main {
                 page.close();
 
 
-            } else if (immFrame.url().contains("hep5")) {
+            } else if (immFrame!=null&&immFrame.url().contains("hep5")) {
                 System.out.println("尝试h5动画");
                 try {
                     AnimationMirror.saving(immFrame.url(), savePath, statePath);
