@@ -42,7 +42,7 @@ public class Main {
         Files.createDirectories(Paths.get(baseDir));
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(true)/**4、改成false 可实时看到浏览器画面 */
+                    new BrowserType.LaunchOptions().setHeadless(false)/**4、改成false 可实时看到浏览器画面 */
             );
             if (retry) {
                 ArrayList<String> integers = new ArrayList<>();
@@ -103,7 +103,7 @@ public class Main {
             } else {
                 /**3、改这里 控制遍历的资源id
                  */
-                for (int i = 222; i < 250; i++) {
+                for (int i = 0; i < 300; i++) {
                     String saveDir = baseDir + "/" + i;
                     Files.createDirectories(Paths.get(saveDir));
 
@@ -148,11 +148,17 @@ public class Main {
             // 1. 尝试点击全屏/展开按钮
             tryClickFullScreen(page);
             //26.8.31 改
+
+            immFrame = findFrame1(page, false);
             if (!(tmpiframeurl.isEmpty() || tmpiframeurl.isBlank())) {
                 page.navigate(tmpiframeurl);
-            }
-            immFrame = findFrame1(page, false);
+                page.waitForLoadState();
+                Thread.sleep(5000);
 
+                // ！！！navigate 之后旧 Frame 已经死亡
+                // 此时页面本身就是之前 iframe 的内容
+                immFrame = page.mainFrame();
+            }
 
             Thread.sleep(5000);
             tmpiframeurl = "";
@@ -743,6 +749,7 @@ public class Main {
         List<Frame> frames = page.frames();
         if (frames.size() > 1) {
             System.out.println("降级使用子 frame: " + frames.get(1).url());
+           tmpiframeurl=frames.get(1).url();
             return frames.get(1);
         }
         return null;
