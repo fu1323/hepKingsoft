@@ -2,20 +2,31 @@ package xin.chunming;
 
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.ScreenshotCaret;
+
 import okhttp3.*;
 import okhttp3.Request;
 import okhttp3.Response;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 import java.io.*;
 import java.nio.file.*;
+import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.Base64;
-
+/** 支持3种模式  1、普通模式 通过书id枚举二维码资源 2、普通模式通过书id枚举二维码资源  初次抓取完成后 再次尝试抓取第一次失败的资源 3、配置抓取模式,读取detailurl.txt,逐个根据文件里url下载资源
+ *   配置抓取模式下 detailurl.txt格式:   https://abooks.hep.com.cn/resource/detail?dirId=xxxxxxxxx&projectId=xxxxxxxxx&resourceId=xxxxxxxxx   每行一个 放到项目目录下
+ *
+ * */
 public class Main {
-    private static boolean retry = false;
-    /**
-     * 5、初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源
-     */
+    private static boolean retry = false; /** 普通模式下, 初次抓取完成后,改成true 会再次尝试抓取第一次失败的资源 */
+    private static boolean read_urlDetailTXT = true; /** 模式3: 配置抓取模式    默认false ,改成true:进入模式3:读取detailurl.txt,逐个根据文件里url下载资源 */
+    private static boolean headLess = false;    /** 改成false 可实时看到浏览器画面 */
+    private static int start = 0;   /** 普通模式下 枚举资源id起始 */
+    private static int end = 100;   /** 普通模式下 枚举资源id结束值 */
+    private static String baseUrl = "https://abooks.hep.com.cn/1247811/"; /**1、改这里 控制书id */
+    private static String baseDir = "output04";  /**2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建*/
 
     // ─── 配置区 ───────────────────────────────────────────────
     private static final int PDF = 0;   // 初始页面加载等待
@@ -37,14 +48,25 @@ public class Main {
     public static void main(String[] args) throws Exception {
         System.out.println("+++++++++ 高教社资源提取工具 (2、下载模块)+++++++++ V2.0 by 猫小咪 Thanks to Claude!");
         System.err.println("免责声明: 资源版权属于高教社, 请勿滥用本工具进行盗版 爬虫 传播 否则后果自负!");
-        String baseUrl = "https://abooks.hep.com.cn/54731/"; /**1、改这里 控制书id*/
-        String baseDir = "output01";  /**2、改这里 控制输出目录的名称 在项目目录下 文件夹不存在会自动创建*/
-        Files.createDirectories(Paths.get(baseDir));
+             Files.createDirectories(Paths.get(baseDir));
+
+        ArrayList<String> detailStrings = new ArrayList<>();
+        if (read_urlDetailTXT) {
+            BufferedReader bufferedReader = new BufferedReader(new FileReader("detailurl.txt"));
+            String line;
+            while ((line = bufferedReader.readLine()) != null) {
+                String replace = line.replace("\n", "");
+                if (!detailStrings.contains(replace)) {
+                    detailStrings.add(replace);
+                }
+            }
+
+        }
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(false)/**4、改成false 可实时看到浏览器画面 */
+                    new BrowserType.LaunchOptions().setHeadless(headLess)
             );
-            if (retry) {
+            if (retry && !read_urlDetailTXT) {
                 ArrayList<String> integers = new ArrayList<>();
                 File file = new File(baseDir);
                 if (file.exists() && file.isDirectory()) {
@@ -81,51 +103,55 @@ public class Main {
                         Files.createDirectories(Paths.get(saveDir));
 
                         // 每次都新建 context，用完立即关闭，防止资源泄漏
-                        BrowserContext context = browser.newContext(
-                                new Browser.NewContextOptions()
-                                        .setViewportSize(1920, 1080)
-                                        .setDeviceScaleFactor(DEVICE_SCALE)
-                                        .setStorageStatePath(Paths.get(statePath))
-                        );
-
-                        try {
-                            captureDocument(context, baseUrl + i1, saveDir);
-
-
-                        } finally {
-                            context.close(); // ← 关键：每页处理完立即关掉
-                        }
+                        extracted(browser, baseUrl, i1, saveDir);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
 
                 }
             } else {
-                /**3、改这里 控制遍历的资源id
-                 */
-                for (int i = 0; i < 300; i++) {
+
+                if (read_urlDetailTXT) {
+                    start = 0;
+                    end = detailStrings.size();
+                }
+                for (int i = start; i < end; i++) {
                     String saveDir = baseDir + "/" + i;
                     Files.createDirectories(Paths.get(saveDir));
 
                     // 每次都新建 context，用完立即关闭，防止资源泄漏
-                    BrowserContext context = browser.newContext(
-                            new Browser.NewContextOptions()
-                                    .setViewportSize(1920, 1080)
-                                    .setDeviceScaleFactor(DEVICE_SCALE)
-                                    .setStorageStatePath(Paths.get(statePath))
-                    );
+                    if (read_urlDetailTXT) {
+                        extracted(browser, detailStrings.get(i), i, saveDir);
 
-                    try {
-                        captureDocument(context, baseUrl + i, saveDir);
-
-
-                    } finally {
-                        context.close(); // ← 关键：每页处理完立即关掉
-                    }
+                    }else{
+                    extracted(browser, baseUrl, i, saveDir);}
                 }
             }
 
             browser.close();
+        }
+    }
+
+    private static void extracted(Browser browser, String baseUrl, int i, String saveDir) {
+        BrowserContext context = browser.newContext(
+                new Browser.NewContextOptions()
+                        .setViewportSize(1920, 1080)
+                        .setDeviceScaleFactor(DEVICE_SCALE)
+                        .setStorageStatePath(Paths.get(statePath))
+        );
+
+        try {
+            if (read_urlDetailTXT) {
+                captureDocument(context, baseUrl, saveDir);
+
+            } else {
+                captureDocument(context, baseUrl + i, saveDir);
+
+            }
+
+
+        } finally {
+            context.close(); // ← 关键：每页处理完立即关掉
         }
     }
 
@@ -214,7 +240,7 @@ public class Main {
                 page.close();
 
 
-            } else if (immFrame!=null&&immFrame.url().contains("hep5")) {
+            } else if (immFrame != null && immFrame.url().contains("hep5")) {
                 System.out.println("尝试h5动画");
                 try {
                     AnimationMirror.saving(immFrame.url(), savePath, statePath);
@@ -749,7 +775,7 @@ public class Main {
         List<Frame> frames = page.frames();
         if (frames.size() > 1) {
             System.out.println("降级使用子 frame: " + frames.get(1).url());
-           tmpiframeurl=frames.get(1).url();
+            tmpiframeurl = frames.get(1).url();
             return frames.get(1);
         }
         return null;
@@ -885,8 +911,43 @@ public class Main {
         return frame.locator(".canvas-unit").count();
     }
 
+    public static OkHttpClient getUnsafeOkHttpClient() {
+        try {
+            // 1. 创建信任所有证书的 TrustManager
+            final TrustManager[] trustAllCerts = new TrustManager[]{
+                    new X509TrustManager() {
+                        @Override
+                        public void checkClientTrusted(X509Certificate[] chain, String authType) {
+                        }
+
+                        @Override
+                        public void checkServerTrusted(X509Certificate[] chain, String authType) {
+                        }
+
+                        @Override
+                        public X509Certificate[] getAcceptedIssuers() {
+                            return new X509Certificate[]{};
+                        }
+                    }
+            };
+
+            // 2. 初始化 SSLContext
+            final SSLContext sslContext = SSLContext.getInstance("SSL");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+
+            // 3. 构建 OkHttpClient，同时设置 sslSocketFactory 和 hostnameVerifier
+            OkHttpClient.Builder builder = new OkHttpClient.Builder();
+            builder.sslSocketFactory(sslContext.getSocketFactory(), (X509TrustManager) trustAllCerts[0]);
+            builder.hostnameVerifier((hostname, session) -> true); // 忽略主机名校验
+
+            return builder.build();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public static void downloadVideo(String url, File saveFile) {
-        OkHttpClient client = new OkHttpClient();
+        OkHttpClient client = getUnsafeOkHttpClient();
         Request request = new Request.Builder()
                 .url(url)
                 .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36")
