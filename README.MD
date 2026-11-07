@@ -483,3 +483,300 @@ output01/
 项目出于对网页渲染、浏览器自动化与在线 Office 预览机制的学习兴趣而开发。感谢 **Claude** 在方案讨论、代码调试及实现思路方面提供的帮助。
 
 项目仓库：**[fu1323/hepKingsoft](https://github.com/fu1323/hepKingsoft)**
+
+# 26.11 针对旧版由于虚拟滚动导致word最多只有两页的问题 bug修复   Word 虚拟滚动提取模块：MutationObserver 技术解析
+
+> 对应文件：`src/main/java/xin/chunming/WordCapture.java`、`src/main/resources/word-observer.js`。本文基于当前补丁源码分析，解释设计动机、执行链路、关键数据结构、失败恢复及已知边界；并非对真实金山预览站点的完整兼容性保证。
+
+## 1. 原有实现为什么只保存两页
+
+原 `Main.captureWordMode()` 从 `document.querySelectorAll('.canvas-unit')` 获取节点列表，使用列表下标 `idx` 命名 `page_000.png`、`page_001.png`，并用 `Set<Integer> savedIndices` 去重。这隐含了一个错误前提：**DOM 节点下标等于文档页码**。
+
+虚拟滚动组件为了节省内存，可能始终保留两个 `.canvas-unit`，随着滚动替换其 SVG 内容：
+
+| 时刻 | DOM 槽位 0 | DOM 槽位 1 | 原代码结果 |
+|---|---|---|---|
+| 初始 | 第 1 页 | 第 2 页 | 保存 0、1 |
+| 滚动后 | 第 3 页 | 第 4 页 | `savedIndices` 已包含 0、1，全部跳过 |
+| 再滚动 | 第 5 页 | 第 6 页 | 继续跳过 |
+
+此外，原实现按连续无新增保存次数退出，无法区分“渲染慢”“正在滚动”“确实到底”。
+
+## 2. 新方案的整体架构
+
+```text
+Main.captureDocument()
+  └── captureWordMode(page, frame, savePath)
+        └── WordCapture.capture(...)
+              ├── installObserver() 读取并注入 word-observer.js
+              ├── toTop() 回到顶部
+              ├── captureLoop (WordCapture.run)
+              │     ├── scan() 主动补扫
+              │     ├── drainQueue() 消费 SVG 快照
+              │     │     ├── take() → inFlight
+              │     │     ├── Blob → Image → Canvas → PNG Base64
+              │     │     ├── Java Base64 解码 + 临时文件写入 + rename
+              │     │     └── ack(ok=true/false) / drop()
+              │     ├── status() 检查 pending、unstable、队列、底部
+              │     └── scrollDown() 继续滚动
+              ├── 最后补扫 4 次
+              └── stop() 释放 observer 和定时器
+```
+
+职责边界：**JavaScript 观察并冻结 DOM 状态；Java 串行驱动 Playwright、处理图像、写入文件。** 没有额外的 Java Playwright 工作线程。
+
+## 3. 为什么选择 MutationObserver
+
+`MutationObserver` 是浏览器原生 DOM 变化订阅机制。此处监听：
+
+```javascript
+observer.observe(document.documentElement, {
+  subtree: true,
+  childList: true,
+  attributes: true,
+  characterData: true
+});
+```
+
+- `childList`：捕获 `.canvas-unit` 新增、移除，及内部 SVG 子节点替换。
+- `attributes`：捕获 class、SVG 属性等修改，包括 pending 状态切换。
+- `characterData`：捕获文本节点变化。
+- `subtree`：将监听范围扩展到子树。
+
+`mutationRelated()` 过滤与 `.canvas-unit` 无关的变更，`scheduleScan()` 合并密集事件，80ms 后扫描一次，避免每次 DOM 微小修改都立即完整序列化 SVG。
+
+**局限**：它不是滚动监听器；`scrollTop` 改变本身不会触发 DOM mutation；Canvas 像素更新也不会自动触发。代码因此另设 `setInterval(scan, 150)` 和 Java 主动 `scan()` 兜底。
+
+## 4. SVG 从候选到队列的状态转换
+
+`word-observer.js` 的关键结构：
+
+```javascript
+const candidates = new WeakMap();
+const queued = new Map();
+const inFlight = new Map();
+const committed = new Map();
+```
+
+| 结构 | Key | Value | 用途 |
+|---|---|---|---|
+| `candidates` | `.canvas-unit` DOM 对象 | 页面身份、SVG 指纹、首次观察时间 | 判断当前渲染版本是否稳定 |
+| `queued` | 页面身份 `key` | **完整 SVG 字符串快照**及尺寸 | 等待 Java 领取 |
+| `inFlight` | 页面身份 `key` | 已领取快照 | 避免同一版本被并发重复领取 |
+| `committed` | 页面身份 `key` | 成功保存的 SVG 指纹 `sig` | 避免重复保存相同版本 |
+
+一次扫描的主要步骤：
+
+1. 找到所有 `.canvas-unit`。
+2. 跳过带 `.doc-pending-canvas-unit` 的节点。
+3. 要求内部有非空 SVG，且宽高有效。
+4. `XMLSerializer().serializeToString(svg)` 冻结 SVG XML；必要时补 `xmlns:xlink`。
+5. 计算内容签名 `sig`，识别页面身份 `key`。
+6. 将 `(key, sig)` 与 `candidates` 中上次观察结果比较；发生变化则重置稳定计时。
+7. 同一版本稳定至少 `STABLE_MS = 450` 毫秒，且不在已提交、待处理或处理中集合，才放入 `queued`。
+
+这里的“稳定”指**两次扫描之间序列化 SVG 内容一致且经过一定时间**，并不等价于网络资源、字体、外链图片都已完全加载。
+
+### 为什么必须存字符串快照
+
+错误方案：把 DOM 元素 `unit` 或 `svg` 引用交给 Java，等保存时再读取。虚拟滚动可能在这段时间把节点内容改成下一页。
+
+当前方案：
+
+```javascript
+queued.set(identity.key, {
+  key: identity.key,
+  sig,
+  kind: identity.kind,
+  svgStr: xml,
+  w,
+  h
+});
+```
+
+此时 `svgStr` 是独立字符串，后续 DOM 被回收不会改变已入队的内容。这是解决虚拟滚动漏页的关键之一。
+
+## 5. 页面身份：为什么不用 DOM 下标
+
+`pageIdentity(unit, xmlSig)` 尝试三层识别：
+
+**第一优先级：页面在滚动内容中的位置。** 从可滚动祖先 `scrollRoot()` 获取 `scrollTop`，结合元素与滚动根的 `getBoundingClientRect()` 估算文档内的纵向位置，量化为 `pos:${Math.round(y / 20)}`。它识别的是页面所处的布局位置，而不是复用的 DOM 槽位。
+
+**第二优先级：页码相关属性。** 如果位置方案不可用，查找当前元素及部分祖先的 `data-page-index`、`data-page-number`、`data-page-no`、`data-page-num`、`data-page-id`、`page-index`。
+
+**第三优先级：SVG 内容签名。** 以 `svg:${xmlSig}` 兜底。两个内容完全相同的页面可能被合并。
+
+需要特别强调：**位置键是启发式识别，不是文档真实页码**。虚拟列表若用 `transform` 重排、滚动锚点修正、动态页高或回收槽位的布局坐标，位置估算可能漂移。代码对小幅位置抖动做了缓和处理，但无法保证所有预览器布局都正确。
+
+`signature()` 使用两组 32 位 FNV 风格散列及 XML 长度，适合快速变化检测，**不是密码学哈希，也不能保证零碰撞**。
+
+## 6. Java 怎样消费队列
+
+`WordCapture.drainQueue()` 每轮最多消费 40 个任务：
+
+```java
+Map<String, Object> item = (Map<String, Object>) frame.evaluate(
+    "() => window.__hepWordCapture.take()");
+```
+
+`take()` 从 `queued` 移走一项并放入 `inFlight`。Java 随后通过 `frame.evaluate(SVG_TO_PNG_JS, item)` 把已捕获的 SVG XML 转为 PNG Base64。
+
+### SVG → PNG 的浏览器原生管线
+
+```text
+SVG XML 字符串
+  → Blob(type=image/svg+xml)
+  → URL.createObjectURL(blob)
+  → new Image() / img.src = blob URL
+  → 等待 img.onload
+  → canvas.getContext('2d').drawImage(...)
+  → canvas.toDataURL('image/png')
+  → Base64 字符串
+  → Java Base64.getDecoder().decode(...)
+  → PNG 文件
+```
+
+浏览器负责 SVG 解析和光栅化，Java 不需要自己实现 SVG path/text 渲染。`SCALE = 1` 维持当前输出倍率；设为 2 会将 Canvas 宽高扩大两倍，像素数约变为四倍，内存与编码成本也明显增加。
+
+`URL.revokeObjectURL(url)` 在成功/失败回调中释放临时 URL。Canvas 导出可能因跨域资源污染、安全限制或 SVG 资源不完整失败，代码会返回 `null`，Java 进入重试。
+
+### 文件写入与 ACK
+
+Java 先将 PNG 写入 `page_XXX.png.tmp`，再通过 `Files.move(..., REPLACE_EXISTING)` 替换目标文件。相比直接写最终 PNG，可以降低异常中断留下半张最终文件的概率；**但没有显式请求 `ATOMIC_MOVE`，因此不能宣称文件替换在所有文件系统上原子化**。
+
+成功后：
+
+```javascript
+ack({ key, sig, ok: true })
+```
+
+`inFlight` 被清理，`committed[key] = sig`，后续扫描相同版本不再入队。
+
+失败后：
+
+```javascript
+ack({ key, sig, ok: false })
+```
+
+快照重新放回 `queued`；Java 按 `key + '|' + sig` 记录失败次数，达到 3 次后调用 `drop(key)`，清除阻塞任务，并在本次运行中将其版本视为已处理。
+
+因此，`drop()` **不是保存成功**，只是防止坏任务无限阻塞；日志中的 `permanentlyFailed` 必须单独关注。
+
+## 7. 背压：为什么先保存再滚动
+
+如果 Java 每次都直接向下滚动，虚拟列表可能在 SVG 完成序列化前就回收页面。新主循环先 `scan()`、`drainQueue()`、`status()`，只要有待处理/处理中任务，或者本轮刚处理了任务，就暂不滚动：
+
+```java
+if (queued > 0 || inFlight > 0 || processed > 0) {
+    bottomSince = -1;
+    continue;
+}
+```
+
+此外，`MAX_QUEUE = 16` 限制浏览器端快照积压，避免长文档把大量 SVG XML 永久堆在浏览器内存中。这是一种简化的背压机制：**处理速度决定滚动速度**。
+
+## 8. 如何决定下一次滚动
+
+`WordCapture.run()` 采用单线程循环，关键参数：
+
+| 参数 | 当前值 | 含义 |
+|---|---:|---|
+| `SCROLL_STEP` | 450px | 每次移动的距离 |
+| `MIN_DWELL_MS` | 1400ms | 每个滚动位置至少观察的时间 |
+| `MAX_RENDER_WAIT_MS` | 5500ms | 遇到 pending/unstable 时最多等待的时间 |
+| `BOTTOM_QUIET_MS` | 5000ms | 到底且无新 DOM 变化的安静窗口 |
+| `BOTTOM_PENDING_TIMEOUT_MS` | 15000ms | 底部仍有未完成页面时的超时 |
+| `MAX_ROUNDS` | 5000 | 循环安全上限 |
+
+当队列为空、当前视口已观察足够久，并且没有仍需等待的 pending/unstable 页面时，调用：
+
+```java
+frame.evaluate("(step) => window.__hepWordCapture.scrollDown(step)", SCROLL_STEP);
+```
+
+浏览器端 `scrollDown()` 修改真正滚动根的 `scrollTop`。滚动根通过 `.canvas-unit` 的可滚动祖先、`#workspace` 和 `document.scrollingElement` 依次识别，而不是固定假定 `#workspace` 一定是滚动元素。
+
+**注意**：达到 `MAX_RENDER_WAIT_MS` 后，即使当前页仍不稳定，主循环也可能继续滚动。这是防止永久卡死的折中，不是“保证绝不漏页”的机制。若页面特别慢，应增加等待或记录未完成页以便二次抓取。
+
+## 9. 何时结束抓取
+
+与原来的“连续两轮没有新文件就退出”不同，新代码要求：
+
+1. `scrollTop + clientHeight` 接近 `scrollHeight`，确认处于滚动底部；
+2. `queued == 0`、`inFlight == 0`；
+3. `pendingUnits == 0`、`unstableUnits == 0`；
+4. 在底部持续至少 5 秒；
+5. 距离上次相关 DOM 变化至少 5 秒。
+
+若底部持续 15 秒仍存在未完成页面，则输出超时警告并结束。主循环结束后再主动扫描四次，尝试接住延迟入队的快照。`finally` 调用 `stop()`，断开观察器、清除定时器。
+
+这套终止条件比“DOM 数量不变”可靠，但仍然依赖滚动根识别正确、网页不在更晚时间异步加载新内容。
+
+## 10. 页面命名与更新策略
+
+Java 用 `LinkedHashMap<String,Integer> pageNumbers` 将首次出现的 `pageKey` 分配为 `0、1、2...`，写为 `page_000.png`、`page_001.png` 等。若同一 `key` 后续出现新 `sig`，覆盖更新对应 PNG，并增加 `updatedPages`。
+
+这意味着**输出文件序号是首次捕获顺序，不一定等于 Word 原始页码**。如果页面位置识别不稳定，可能发生同一页拆成多个文件，或者不同页覆盖同一文件。长期改进应优先解析可靠的真实页码元数据，并在输出中记录 `pageKey → 文件名 → SVG 指纹` 清单。
+
+## 11. 典型执行示例
+
+```text
+进入 Word 模式
+→ 注入观察器并回到顶部
+→ .canvas-unit[0] 显示第1页，.canvas-unit[1] 显示第2页
+→ 序列化两个 SVG，等待稳定
+→ queued = {page1, page2}
+→ Java take(page1)，转换 PNG，写入，ack(true)
+→ Java take(page2)，转换 PNG，写入，ack(true)
+→ 队列空、视口稳定 → scrollDown(450)
+→ 虚拟滚动复用同两个 DOM 节点，内容变成第3、4页
+→ MutationObserver 触发扫描，检测到新 SVG/页面位置
+→ queued = {page3, page4}
+→ Java 保存 page_002.png、page_003.png
+→ 继续滚动直到到底且安静窗口满足
+→ 最后补扫、断开观察器、输出统计
+```
+
+上述是**理想执行序列**。实际是否准确识别第 3、4 页取决于预览器 DOM 布局和 `pageIdentity()` 的可用性。
+
+## 12. 排障指南
+
+### A. 仍然只保存两页
+
+查看日志中的 `root`、`scroll`、`DOM`、`pending`、`unstable`。如果 `scroll` 的 `top` 不变化，说明找错了滚动容器。如果 `top` 变化但没有新任务，检查 `pageIdentity()` 是否持续返回相同 key、SVG XML 是否真的更新。
+
+### B. 保存出重复页
+
+打印每次入队的 `key`、`kind`、`sig`、SVG 长度、页面 `getBoundingClientRect().top`。重点排查位置量化在滚动期间漂移，导致同一页产生多个 key。
+
+### C. 保存的 PNG 不完整或缺字
+
+检查 SVG 是否依赖外部 CSS、字体、`<image href>`、`<use>` 引用。`STABLE_MS=450` 只证明 XML 短时间不变，不保证依赖加载完毕。可临时同时落盘 `.svg` 便于定位问题属于捕获阶段还是 Canvas 阶段。
+
+### D. 到底后迟迟不退出
+
+检查是否有持续变化的 SVG 属性、pending 节点、动画元素，或滚动根 `scrollHeight` 不断变化。必要时将“已稳定页面”与“无关动画变化”区分。
+
+### E. 出现 `永久失败`
+
+关注 `SVG 转 PNG 返回空数据`、Base64 解码错误、文件系统权限或外部资源问题。当前 `drop()` 会跳过该版本，不能把最终保存数量当成全部成功。
+
+## 13. 仍值得改进的地方
+
+1. **真实页码识别**：尽量从预览器稳定的页码属性或业务元数据获得页码，替代坐标推断。
+2. **位置计算验证**：当前 `root === document.scrollingElement` 时的坐标换算在部分页面布局下可能需要修正；最好实测滚动前后同一页的 key 是否不变。
+3. **保存清单**：记录 key、sig、输出路径、保存时间、失败次数，支持中断后续传与问题复现。
+4. **持久失败队列**：对 `drop()` 的页面输出单独 JSON 报告，避免静默漏页。
+5. **资源内联**：如 SVG 引用外部图片或字体，可考虑在合规前提下先将依赖资源内联，再光栅化。
+6. **精确完成判定**：若能拿到文档真实总页数，应与成功保存的唯一页码集合核对，而不只依赖滚动到底。
+7. **稳定性策略**：为单页设置独立计时与超时；当前 WeakMap 候选状态在 DOM 复用时虽可重置，但无法解决所有异步资源加载情形。
+
+## 14. 核心总结
+
+原版代码将 **DOM 节点下标** 当作 **文档页码**，在虚拟滚动场景下自然会漏页。新版的关键不是单纯“加一个监听器”，而是完整地调整了数据流：
+
+> **观察 DOM 变化 → 识别页面版本 → 冻结 SVG 字符串 → 排队 → Java 转 PNG → 文件写入 → ACK → 再滚动。**
+
+`MutationObserver` 负责及时发现变化；稳定性检测避免抓取半成品；快照避免 DOM 复用污染数据；队列与 ACK 避免保存过程丢任务；滚动背压与底部安静窗口降低漏页和误退出概率。
+
+这是一套适合当前 Playwright + Java 项目的工程化改进，但它不是对所有虚拟列表都通用的完美分页算法。**真正决定最终正确率的仍是可靠的页面身份识别和渲染完成判据。**
